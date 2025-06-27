@@ -1,6 +1,10 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk, ImageDraw
+from PIL.Image import Image as PILImage
+from typing import Union
+import cv2
+from typing import Optional
 
 
 class ResizeDialog(simpledialog.Dialog):
@@ -109,6 +113,10 @@ class ImageApp:
         self.btn_load = tk.Button(control_frame, text="Загрузить изображение", command=self.load_image)
         self.btn_load.pack(side=tk.LEFT, padx=5)
 
+        self.btn_camera = tk.Button(control_frame, text="Снять с камеры",
+                                    command=self._capture_from_camera, state='normal')
+        self.btn_camera.pack(side=tk.LEFT, padx=5)
+
         self.btn_resize = tk.Button(control_frame, text="Изменить размер", command=self.resize_image,
                                     state='disabled')
         self.btn_resize.pack(side=tk.LEFT, padx=5)
@@ -136,8 +144,9 @@ class ImageApp:
         self.img_label = tk.Label(master)
         self.img_label.pack(pady=5)
 
-        self.image = None
+        self.image: Optional[PILImage] = None
         self.tk_image = None
+        self.camera_capture: Optional[cv2.VideoCapture] = None
 
     def load_image(self):
         path = filedialog.askopenfilename(
@@ -147,21 +156,100 @@ class ImageApp:
             return
 
         try:
-            img = Image.open(path).convert("RGB")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось открыть файл:\n{e}")
+            loaded_img = Image.open(path).convert("RGB")
+        except Exception as error:
+            messagebox.showerror("Ошибка", f"Не удалось открыть файл:\n{error}")
             return
 
-        self.image = img
+        self.image = loaded_img
         self.show_image(self.image)
 
-        for rb in (self.rb_red, self.rb_green, self.rb_blue):
-            rb.config(state='normal')
+        for radio_button in (self.rb_red, self.rb_green, self.rb_blue):
+            radio_button.config(state='normal')
         self.btn_resize.config(state='normal')
         self.btn_rotate.config(state='normal')
         self.btn_draw.config(state='normal')
+        self.btn_camera.config(state='normal')
 
-    def get_channel_image(self):
+    def _capture_from_camera(self):
+        """Захват изображения с веб-камеры"""
+        try:
+            if self.camera_capture is not None:
+                self.camera_capture.release()
+
+            self.camera_capture = cv2.VideoCapture(0)
+
+            if not self.camera_capture.isOpened():
+                raise RuntimeError("Не удалось подключиться к камере")
+
+            preview_window = tk.Toplevel(self.root)
+            preview_window.title("Предпросмотр камеры")
+            preview_label = tk.Label(preview_window)
+            preview_label.pack()
+
+            def on_capture():
+                self._take_photo(preview_window)
+
+            btn_capture = tk.Button(preview_window, text="Сделать снимок",
+                                    command=on_capture)
+            btn_capture.pack(pady=10)
+
+            def update_preview():
+                ret, frame = self.camera_capture.read()
+                if ret:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    preview_img = Image.fromarray(frame)
+                    preview_imgtk = ImageTk.PhotoImage(image=preview_img)
+                    preview_label.imgtk = preview_imgtk
+                    preview_label.configure(image=preview_imgtk)  # type: ignore
+
+                preview_label.after(10, update_preview)
+
+            update_preview()
+
+            preview_window.protocol("WM_DELETE_WINDOW", lambda: self._close_camera(preview_window))
+
+        except Exception as error:
+            messagebox.showerror("Ошибка камеры",
+                                 f"Проблема с подключением камеры:\n{error}\n\n"
+                                 "Возможные решения:\n"
+                                 "1. Проверьте подключение камеры\n"
+                                 "2. Убедитесь, что камера не используется другим приложением\n"
+                                 "3. Проверьте права доступа для приложения")
+            self._close_camera()
+
+    def _take_photo(self, preview_window):
+        """Сохранение снимка с камеры"""
+        try:
+            ret, frame = self.camera_capture.read()
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                self.image = Image.fromarray(frame)
+                self.show_image(self.image)
+
+                for radio_button in (self.rb_red, self.rb_green, self.rb_blue):
+                    radio_button.config(state='normal')
+                self.btn_resize.config(state='normal')
+                self.btn_rotate.config(state='normal')
+                self.btn_draw.config(state='normal')
+
+            preview_window.destroy()
+            self._close_camera()
+
+        except Exception as error:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить снимок:\n{error}")
+            preview_window.destroy()
+            self._close_camera()
+
+    def _close_camera(self, window=None):
+        """Безопасное закрытие камеры"""
+        if self.camera_capture is not None:
+            self.camera_capture.release()
+            self.camera_capture = None
+        if window:
+            window.destroy()
+
+    def get_channel_image(self) -> Optional[PILImage]:
         if self.image is None:
             return None
 
@@ -190,9 +278,13 @@ class ImageApp:
         if channel_img:
             self.show_image(channel_img)
 
-    def show_image(self, img):
-        self.tk_image = ImageTk.PhotoImage(img)
-        self.img_label.config(image=self.tk_image)
+    def show_image(self, img: Union[PILImage, str]) -> None:
+        """Отображает изображение в интерфейсе."""
+        if isinstance(img, str):
+            img = Image.open(img).convert("RGB")
+
+        self.tk_image = ImageTk.PhotoImage(image=img)
+        self.img_label.config(image=self.tk_image)  # type: ignore
         self.img_label.image = self.tk_image
 
     def resize_image(self):
@@ -240,11 +332,10 @@ class ImageApp:
             return
 
         dlg = LineDialog(self.root)
-        if not hasattr(dlg, 'x1'):  # Если диалог закрыт без ввода данных
+        if not hasattr(dlg, 'x1'):  
             return
 
         try:
-            # Создаем копию изображения для рисования
             img_copy = self.image.copy()
             draw = ImageDraw.Draw(img_copy)
 
