@@ -2,9 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 from PIL.Image import Image as PILImage
-from typing import Union
+from typing import Union, Optional
 import cv2
-from typing import Optional
 
 
 class ResizeDialog(simpledialog.Dialog):
@@ -146,7 +145,7 @@ class ImageApp:
 
         self.image: Optional[PILImage] = None
         self.tk_image = None
-        self.camera_capture: Optional[cv2.VideoCapture] = None
+        self.camera_capture: Optional[cv2.VideoCapture] = None  # type: ignore
 
     def load_image(self):
         path = filedialog.askopenfilename(
@@ -172,12 +171,11 @@ class ImageApp:
         self.btn_camera.config(state='normal')
 
     def _capture_from_camera(self):
-        """Захват изображения с веб-камеры"""
         try:
             if self.camera_capture is not None:
                 self.camera_capture.release()
 
-            self.camera_capture = cv2.VideoCapture(0)
+            self.camera_capture = cv2.VideoCapture(0)   # type: ignore
 
             if not self.camera_capture.isOpened():
                 raise RuntimeError("Не удалось подключиться к камере")
@@ -197,7 +195,7 @@ class ImageApp:
             def update_preview():
                 ret, frame = self.camera_capture.read()
                 if ret:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # type: ignore
                     preview_img = Image.fromarray(frame)
                     preview_imgtk = ImageTk.PhotoImage(image=preview_img)
                     preview_label.imgtk = preview_imgtk
@@ -219,11 +217,10 @@ class ImageApp:
             self._close_camera()
 
     def _take_photo(self, preview_window):
-        """Сохранение снимка с камеры"""
         try:
             ret, frame = self.camera_capture.read()
             if ret:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # type: ignore
                 self.image = Image.fromarray(frame)
                 self.show_image(self.image)
 
@@ -242,7 +239,6 @@ class ImageApp:
             self._close_camera()
 
     def _close_camera(self, window=None):
-        """Безопасное закрытие камеры"""
         if self.camera_capture is not None:
             self.camera_capture.release()
             self.camera_capture = None
@@ -279,12 +275,11 @@ class ImageApp:
             self.show_image(channel_img)
 
     def show_image(self, img: Union[PILImage, str]) -> None:
-        """Отображает изображение в интерфейсе."""
         if isinstance(img, str):
             img = Image.open(img).convert("RGB")
 
         self.tk_image = ImageTk.PhotoImage(image=img)
-        self.img_label.config(image=self.tk_image)  # type: ignore
+        self.img_label.config(image=self.tk_image)    # type: ignore
         self.img_label.image = self.tk_image
 
     def resize_image(self):
@@ -305,26 +300,40 @@ class ImageApp:
 
     def rotate_image(self):
         if self.image is None:
-            messagebox.showwarning("Внимание",
-                                   "Сначала загрузите изображение.")
+            messagebox.showwarning("Внимание", "Сначала загрузите изображение.")
             return
 
-        angle_str = simpledialog.askstring("Поворот",
-                                           "Введите угол вращения (в градусах):", parent=self.root)
+        angle_str = simpledialog.askstring(
+            "Поворот",
+            "Введите угол вращения (в градусах):\n(от -360 до 360)",
+            parent=self.root
+        )
+
         if angle_str is None:
             return
-
         try:
             angle = float(angle_str)
-        except ValueError:
-            messagebox.showerror("Ошибка", "Пожалуйста, введите числовое значение угла.")
-            return
 
-        try:
+            if not -360 <= angle <= 360:
+                messagebox.showwarning(
+                    "Предупреждение",
+                    "Угол должен быть между -360 и 360 градусов"
+                )
+                return
+
             self.image = self.image.rotate(-angle, expand=True)
             self.update_channel()
+
+        except ValueError:
+            messagebox.showerror(
+                "Ошибка",
+                "Пожалуйста, введите числовое значение угла."
+            )
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при повороте изображения:\n{e}")
+            messagebox.showerror(
+                "Ошибка",
+                f"Не удалось повернуть изображение:\n{str(e)}"
+            )
 
     def draw_line(self):
         if self.image is None:
@@ -332,7 +341,7 @@ class ImageApp:
             return
 
         dlg = LineDialog(self.root)
-        if not hasattr(dlg, 'x1'):  
+        if not hasattr(dlg, 'x1'):
             return
 
         try:
